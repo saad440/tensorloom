@@ -11,10 +11,12 @@
 //! the network layer, when contraction planning needs it. `Tensor` keeps
 //! requiring data. [`Dense`] is its only storage backend for now.
 
+use std::fmt;
+
 use ndarray::{ArrayD, IxDyn};
 use thiserror::Error;
 
-use crate::index::Index;
+use crate::index::{Arrow, Index};
 use crate::scalar::Scalar;
 
 /// Errors raised when constructing tensors.
@@ -170,5 +172,160 @@ impl<S: Scalar> Tensor<S> {
     /// Split into the index list and the storage.
     pub fn into_parts(self) -> (Vec<Index>, Dense<S>) {
         (self.indices, self.storage)
+    }
+}
+
+impl<S: Scalar + fmt::Display> fmt::Display for Tensor<S> {
+    /// Human readable summary: the leg list, then the data - as a
+    /// column-aligned grid for ranks ≤ 2, in flat storage order for
+    /// higher ranks.
+    ///
+    /// Any axis longer than `2 * DISPLAY_EDGE` items is truncated: the
+    /// first and last `DISPLAY_EDGE` items are shown with an ellipsis
+    /// for the skipped interior.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tensorloom::index::{Arrow, Index};
+    /// use tensorloom::tensor::Tensor;
+    ///
+    /// let i = Index::new(2, Arrow::Out);
+    /// let j = Index::new(3, Arrow::In);
+    /// let t = Tensor::from_fn(&[i, j], |c| (c[0] + c[1]) as f64);
+    /// assert_eq!(
+    ///     format!("{t}"),
+    ///     "Tensor[2 out, 3 in]\n[[0, 1, 2]\n [1, 2, 3]]"
+    /// );
+    /// ```
+    ///
+    /// An 8×5 tensor is truncated per axis:
+    ///
+    /// ```
+    /// use tensorloom::index::{Arrow, Index};
+    /// use tensorloom::tensor::Tensor;
+    ///
+    /// let i = Index::new(8, Arrow::Out);
+    /// let j = Index::new(5, Arrow::In);
+    /// let t = Tensor::from_fn(&[i, j], |c| (10 * c[0] + c[1]) as f64);
+    /// assert_eq!(
+    ///     format!("{t}"),
+    ///     "Tensor[8 out, 5 in]\n[[ 0,  1,  2,  3,  4]\n [10, 11, 12, 13, 14]\n [20, 21, 22, 23, 24]\n [ …,  …,  …,  …,  …]\n [50, 51, 52, 53, 54]\n [60, 61, 62, 63, 64]\n [70, 71, 72, 73, 74]]"
+    /// );
+    /// ```
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Tensor[")?;
+        for (axis, leg) in self.indices.iter().enumerate() {
+            if axis > 0 {
+                write!(f, ", ")?;
+            }
+            let dir = match leg.arrow() {
+                Arrow::In => "in",
+                Arrow::Out => "out",
+            };
+            write!(f, "{} {dir}", leg.dim())?;
+        }
+        write!(f, "]")?;
+
+        let data = self.storage.as_array();
+        match self.rank() {
+            0 => {
+                let value = data
+                    .iter()
+                    .next()
+                    .expect("rank-0 storage holds one element");
+                write!(f, "\n{value}")?;
+            }
+            1 => {
+                let (idx, gap) = visible_axis(data.len());
+                let mut texts: Vec<String> =
+                    idx.iter().map(|&i| data[i].to_string()).collect();
+                if gap {
+                    texts.insert(DISPLAY_EDGE, String::from("…"));
+                }
+                write!(f, "\n[")?;
+                for (k, text) in texts.iter().enumerate() {
+                    if k > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{text}")?;
+                }
+                write!(f, "]")?;
+            }
+            2 => {
+                let (row_idx, row_gap) = visible_axis(data.shape()[0]);
+                let (col_idx, col_gap) = visible_axis(data.shape()[1]);
+
+                // One text row per visible matrix row. A row gap is
+                // rendered as one ellipsis row.
+                let mut rows: Vec<Vec<String>> = Vec::new();
+                for (pos, &r) in row_idx.iter().enumerate() {
+                    if row_gap && pos == DISPLAY_EDGE {
+                        rows.push(vec![String::from("…"); col_idx.len() + usize::from(col_gap)]);
+                    }
+                    let mut cells: Vec<String> =
+                        col_idx.iter().map(|&c| data[[r, c]].to_string()).collect();
+                    if col_gap {
+                        cells.push(String::from("…"));
+                    }
+                    rows.push(cells);
+                }
+
+                let width = rows
+                    .iter()
+                    .flatten()
+                    .map(|s| s.chars().count())
+                    .max()
+                    .unwrap_or(0);
+                for (r, row_cells) in rows.iter().enumerate() {
+                    write!(f, "{}", if r == 0 { "\n[[" } else { "\n [" })?;
+                    for (c, text) in row_cells.iter().enumerate() {
+                        if c > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{text:>width$}", width = width)?;
+                    }
+                    write!(f, "]")?;
+                }
+                write!(f, "]")?;
+            }
+            _ => {
+                let (idx, gap) = visible_axis(data.len());
+                let mut texts: Vec<String> =
+                    idx.iter().map(|&i| data[i].to_string()).collect();
+                if gap {
+                    texts.insert(DISPLAY_EDGE, String::from("…"));
+                }
+                write!(f, "\n[")?;
+                for (k, text) in texts.iter().enumerate() {
+                    if k > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{text}")?;
+                }
+                write!(f, "]")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Per-axis print truncation: an axis longer than `2 * DISPLAY_EDGE`
+/// items shows the first and last `DISPLAY_EDGE` items with an
+/// ellipsis for the skipped interior.
+const DISPLAY_EDGE: usize = 3;
+
+/// Which positions of an axis of length `len` to print, and whether
+/// the middle is skipped.
+fn visible_axis(len: usize) -> (Vec<usize>, bool) {
+    if len > 2 * DISPLAY_EDGE {
+        (
+            (0..DISPLAY_EDGE)
+                .chain(len - DISPLAY_EDGE..len)
+                .collect(),
+            true,
+        )
+    } else {
+        ((0..len).collect(), false)
     }
 }
