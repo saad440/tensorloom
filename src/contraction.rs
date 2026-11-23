@@ -1,12 +1,14 @@
 //! Contraction of tensors by shared index identity.
 //!
-//! This module concentrates all of the current numeric kernel work.
-//! Alternative compute backends can attach here later.
+//! Contraction logic lives here. Matrix multiplication lives in
+//! `crate::gemm`, backed by the faer crate. Alternative compute
+//! backends can attach at either layer later.
 
 use std::collections::HashSet;
 
 use ndarray::{Array2, IxDyn};
 
+use crate::gemm::matmul;
 use crate::index::Index;
 use crate::scalar::Scalar;
 use crate::tensor::{Dense, Tensor};
@@ -103,9 +105,8 @@ pub fn contract<S: Scalar>(a: &Tensor<S>, b: &Tensor<S>) -> Tensor<S> {
         .expect("contraction: reshaping `b` to a matrix")
         .into_owned();
 
-    // 5. The GEMM: result[i, k] = sum_j a_mat[i, j] * b_mat[j, k]
-    //    Currently a plain loop matmul, to be swapped for
-    //    `a_mat.dot(&b_mat)` once a BLAS backend is linked.
+    // 5. The GEMM: result[i, k] = sum_j a_mat[i, j] * b_mat[j, k],
+    //    routed through faer (see `crate::gemm`).
     let prod = matmul(&a_mat, &b_mat);
 
     // 6. Reshape back and attach the surviving legs.
@@ -145,20 +146,3 @@ fn combined_dim(axes: &[usize], indices: &[Index]) -> usize {
     axes.iter().map(|k| indices[*k].dim()).product()
 }
 
-/// Plain loop matmul. Placeholder for the BLAS-backed GEMM.
-fn matmul<S: Scalar>(a_mat: &Array2<S>, b_mat: &Array2<S>) -> Array2<S> {
-    let (m, k) = (a_mat.nrows(), a_mat.ncols());
-    let n = b_mat.ncols();
-    let mut out = Array2::from_elem((m, n), S::zero());
-    for x in 0..m {
-        for j in 0..k {
-            // Load once: `a_mat[[x, j]]` is invariant in the y loop.
-            // Avoids the bounds-checked indexed read each iteration.
-            let a_val = a_mat[[x, j]];
-            for y in 0..n {
-                out[[x, y]] = out[[x, y]] + a_val * b_mat[[j, y]];
-            }
-        }
-    }
-    out
-}

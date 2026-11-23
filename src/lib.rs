@@ -6,6 +6,7 @@
 
 #![warn(missing_docs)]
 
+pub(crate) mod gemm;
 pub mod contraction;
 pub mod index;
 pub mod scalar;

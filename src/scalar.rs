@@ -8,12 +8,15 @@ use num_complex::Complex;
 /// Sealed on purpose. The set of element types is a property of the whole
 /// library, not something callers extend. The [`LinalgScalar`] supertrait
 /// supplies the arithmetic ndarray needs for element operations and
-/// BLAS-backed matmul.
+/// matrix multiplication.
 ///
 /// A Lapack-bounded companion trait (SVDs etc.) arrives with the MPS layer.
 /// It will share this crate's sealed impl set.
-pub trait Scalar: LinalgScalar + private::Sealed {}
 
+// `FaerScalar` is deliberately crate-internal so the
+// private-supertrait lint is suppressed on purpose.
+#[allow(private_bounds)]
+pub trait Scalar: LinalgScalar + private::Sealed + crate::gemm::FaerScalar {}
 impl Scalar for f32 {}
 impl Scalar for f64 {}
 impl Scalar for Complex<f32> {}
