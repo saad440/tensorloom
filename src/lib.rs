@@ -6,6 +6,7 @@
 
 #![warn(missing_docs)]
 
+pub mod contraction;
 pub mod index;
 pub mod scalar;
 pub mod tensor;
