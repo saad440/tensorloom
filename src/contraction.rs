@@ -64,10 +64,27 @@ pub fn contract<S: Scalar>(a: &Tensor<S>, b: &Tensor<S>) -> Tensor<S> {
     );
     let shared: HashSet<u64> = a_ids.intersection(&b_ids).copied().collect();
 
-    // 2. Permute axes for the matrix product, keeping storage order
-    //    within each group: a' = (open..., shared...), b' = (shared..., open...).
+    // 2. Permute axes for the matrix product: a' = (open..., shared...),
+    //    b' = (shared..., open...), each group keeping that operand's
+    //    storage order.
     let (a_shared_axes, a_open_axes) = partition_axes(a.indices(), &shared);
-    let (b_shared_axes, b_open_axes) = partition_axes(b.indices(), &shared);
+    let (b_shared_storage_order, b_open_axes) =
+        partition_axes(b.indices(), &shared);
+    // The GEMM pairs the two flattened shared groups position by
+    // position, so both must enumerate identical coordinate tuples.
+    // `a` sets the canonical order (its shared legs in storage order);
+    // b's shared axes are re-ordered to match.
+    let b_shared_axes: Vec<usize> = a_shared_axes
+        .iter()
+        .map(|&k| {
+            let id = a.indices()[k].id();
+            b_shared_storage_order
+                .iter()
+                .copied()
+                .find(|&axis| b.indices()[axis].id() == id)
+                .expect("every shared id occurs in `b` by construction")
+        })
+        .collect();
     let perm_a: Vec<usize> = a_open_axes.iter().chain(a_shared_axes.iter()).copied().collect();
     let perm_b: Vec<usize> = b_shared_axes.iter().chain(b_open_axes.iter()).copied().collect();
 
@@ -85,25 +102,28 @@ pub fn contract<S: Scalar>(a: &Tensor<S>, b: &Tensor<S>) -> Tensor<S> {
 
     // 4. Reshape the permuted views into matrices (copies when the
     //    permutation makes the view non-contiguous).
-    // to_shape yields a Cow array: it borrows when the view is already
-    // contiguous in the target order and copies otherwise. into_owned
-    // normalizes to a plain owned Array2 for the GEMM.
+    // as_standard_layout yields a Cow: it borrows a view that is
+    // already C-contiguous and copies otherwise, so the owned array is
+    // guaranteed standard layout, which the GEMM's flat-slice access
+    // relies on.
     let a_mat: Array2<S> = a
         .storage()
         .as_array()
         .view()
         .permuted_axes(perm_a)
-        .to_shape((oa, s_dim))
-        .expect("contraction: reshaping `a` to a matrix")
-        .into_owned();
+        .as_standard_layout()
+        .into_owned()
+        .into_shape_with_order((oa, s_dim))
+        .expect("contraction: reshaping `a` to a matrix");
     let b_mat: Array2<S> = b
         .storage()
         .as_array()
         .view()
         .permuted_axes(perm_b)
-        .to_shape((s_dim, ob))
-        .expect("contraction: reshaping `b` to a matrix")
-        .into_owned();
+        .as_standard_layout()
+        .into_owned()
+        .into_shape_with_order((s_dim, ob))
+        .expect("contraction: reshaping `b` to a matrix");
 
     // 5. The GEMM: result[i, k] = sum_j a_mat[i, j] * b_mat[j, k],
     //    routed through faer (see `crate::gemm`).
