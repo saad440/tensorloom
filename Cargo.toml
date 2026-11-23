@@ -4,9 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-approx = "0.5.1"
 faer = "0.24"
 ndarray = "0.17.2"
-ndarray-npy = "0.11.0"
 num-complex = "0.4.6"
 thiserror = "2.0.21"
+
+[dev-dependencies]
+approx = "0.5.1"
+ndarray-npy = "0.11.0"
