@@ -16,6 +16,12 @@ The einsum subscript is written so the output leg order matches what
 (shared-a-axis, shared-b-axis) pairs below must stay in sync with the
 `Case` table in the Rust test.
 
+Multi-operand network cases (for tests/network_cross_check.rs) save one
+`<name>-<letter>.npy` per operand letter plus `<name>-out.npy`. Each
+subscript letter appears in at most two operands, and the output order is
+the canonical first-appearance order of the open letters - the same rule
+`TensorNetwork::open_indices` uses.
+
 Regenerate only deliberately, if committing fixtures to the repo.
 The random stream depends on the numpy version.
 
@@ -50,6 +56,16 @@ CASES = [
     ("outer", (3,), (4,), [], "i,j->ij"),
 ]
 
+# (name, [(subscript, shape) per operand], output subscript). The output
+# order must stay in sync with tests/network_cross_check.rs.
+NETWORK_CASES = [
+    (
+        "network",
+        [("pa", (2, 8)), ("aqb", (8, 2, 8)), ("brc", (8, 2, 8)), ("cs", (8, 2))],
+        "pqrs",
+    ),
+]
+
 
 def main() -> None:
     print(f"numpy {np.__version__}, seed {SEED}")
@@ -64,6 +80,15 @@ def main() -> None:
         legs = shared if shared else "no shared legs"
         print(f"{name:8s} {a_shape} x {b_shape} over {legs} -> "
               f"{out.shape}  [{subscript}]")
+    for name, operands, output in NETWORK_CASES:
+        arrays = [rng.standard_normal(shape) for _, shape in operands]
+        subscript = ",".join(letters for letters, _ in operands)
+        out = np.einsum(f"{subscript}->{output}", *arrays)
+        for letter, array in zip("abcd", arrays):
+            np.save(FIXTURES / f"{name}-{letter}.npy", array)
+        np.save(FIXTURES / f"{name}-out.npy", out)
+        print(f"{name:8s} network of {len(arrays)} tensors -> "
+              f"{out.shape}  [{subscript}->{output}]")
 
 
 if __name__ == "__main__":
