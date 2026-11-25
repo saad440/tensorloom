@@ -7,9 +7,10 @@
 //!
 //! Number-free descriptions live one abstraction up: the leg list alone
 //! (a `Vec<Index>`) already describes a tensor's structure, and a
-//! dedicated structure-only type with shape algebra is added alongside
-//! the network layer, when contraction planning needs it. `Tensor` keeps
-//! requiring data. [`Dense`] is its only storage backend for now.
+//! dedicated structure-only type with shape algebra joins the public
+//! API when a public consumer needs one. Contraction planning works on
+//! the leg list directly for now. `Tensor` keeps requiring data.
+//! [`Dense`] is its only storage backend for now.
 
 use std::fmt;
 
@@ -238,8 +239,7 @@ impl<S: Scalar + fmt::Display> fmt::Display for Tensor<S> {
             }
             1 => {
                 let (idx, gap) = visible_axis(data.len());
-                let mut texts: Vec<String> =
-                    idx.iter().map(|&i| data[i].to_string()).collect();
+                let mut texts: Vec<String> = idx.iter().map(|&i| data[i].to_string()).collect();
                 if gap {
                     texts.insert(DISPLAY_EDGE, String::from("…"));
                 }
@@ -261,7 +261,10 @@ impl<S: Scalar + fmt::Display> fmt::Display for Tensor<S> {
                 let mut rows: Vec<Vec<String>> = Vec::new();
                 for (pos, &r) in row_idx.iter().enumerate() {
                     if row_gap && pos == DISPLAY_EDGE {
-                        rows.push(vec![String::from("…"); col_idx.len() + usize::from(col_gap)]);
+                        rows.push(vec![
+                            String::from("…");
+                            col_idx.len() + usize::from(col_gap)
+                        ]);
                     }
                     let mut cells: Vec<String> =
                         col_idx.iter().map(|&c| data[[r, c]].to_string()).collect();
@@ -291,8 +294,7 @@ impl<S: Scalar + fmt::Display> fmt::Display for Tensor<S> {
             }
             _ => {
                 let (idx, gap) = visible_axis(data.len());
-                let mut texts: Vec<String> =
-                    idx.iter().map(|&i| data[i].to_string()).collect();
+                let mut texts: Vec<String> = idx.iter().map(|&i| data[i].to_string()).collect();
                 if gap {
                     texts.insert(DISPLAY_EDGE, String::from("…"));
                 }
@@ -320,9 +322,7 @@ const DISPLAY_EDGE: usize = 3;
 fn visible_axis(len: usize) -> (Vec<usize>, bool) {
     if len > 2 * DISPLAY_EDGE {
         (
-            (0..DISPLAY_EDGE)
-                .chain(len - DISPLAY_EDGE..len)
-                .collect(),
+            (0..DISPLAY_EDGE).chain(len - DISPLAY_EDGE..len).collect(),
             true,
         )
     } else {
