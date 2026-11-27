@@ -21,15 +21,16 @@ use crate::index::{Arrow, Index};
 use crate::scalar::Scalar;
 
 /// Errors raised when constructing tensors.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum TensorError {
-    /// The storage length does not match the product of index dimensions.
-    #[error("storage holds {actual} elements, but the indices describe {expected}")]
-    DimensionMismatch {
-        /// Product of the index dimensions.
-        expected: usize,
-        /// Number of elements in the storage.
-        actual: usize,
+    /// The storage shape does not match the index list: the rank or
+    /// some axis length disagrees.
+    #[error("indices describe shape {expected:?}, but storage has shape {actual:?}")]
+    ShapeMismatch {
+        /// The shape the index list describes.
+        expected: Vec<usize>,
+        /// The shape of the storage array.
+        actual: Vec<usize>,
     },
 }
 
@@ -81,13 +82,14 @@ pub struct Tensor<S: Scalar> {
 impl<S: Scalar> Tensor<S> {
     /// Build a tensor over `indices` from `storage`.
     ///
-    /// Errors if the storage does not hold exactly one element per
-    /// multi-index (the product of the index dimensions).
+    /// Errors if the storage shape does not match the index list -
+    /// rank and every axis length must agree, so that axis `k` of the
+    /// array carries the `k`-th index.
     pub fn new(indices: Vec<Index>, storage: Dense<S>) -> Result<Self, TensorError> {
-        let expected: usize = indices.iter().map(Index::dim).product();
-        let actual = storage.as_array().len();
+        let expected: Vec<usize> = indices.iter().map(Index::dim).collect();
+        let actual: Vec<usize> = storage.as_array().shape().to_vec();
         if expected != actual {
-            return Err(TensorError::DimensionMismatch { expected, actual });
+            return Err(TensorError::ShapeMismatch { expected, actual });
         }
         Ok(Tensor { indices, storage })
     }
@@ -327,5 +329,59 @@ fn visible_axis(len: usize) -> (Vec<usize>, bool) {
         )
     } else {
         ((0..len).collect(), false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Assert that construction fails with `ShapeMismatch` and return
+    /// the two disagreeing shapes.
+    fn expect_mismatch(result: Result<Tensor<f64>, TensorError>) -> (Vec<usize>, Vec<usize>) {
+        let Err(err) = result else {
+            panic!("mis-shaped storage must be rejected");
+        };
+        match err {
+            TensorError::ShapeMismatch { expected, actual } => (expected, actual),
+        }
+    }
+
+    /// The construction boundary enforces axis-by-axis agreement.
+    /// Wrong rank, transposed axes, and stray length-1 axes are rejected.
+    #[test]
+    fn new_requires_full_shape_agreement() {
+        let i = Index::new(2, Arrow::Out);
+        let j = Index::new(3, Arrow::In);
+        let legs = || vec![i.clone(), j.clone()];
+        let dense = |shape: &[usize]| Dense::from_array(ArrayD::from_elem(IxDyn(shape), 0.0_f64));
+
+        // Baseline: the well-shaped tensor constructs.
+        assert!(Tensor::new(legs(), dense(&[2, 3])).is_ok());
+
+        // Same element count, wrong rank.
+        assert_eq!(
+            expect_mismatch(Tensor::new(legs(), dense(&[6]))),
+            (vec![2, 3], vec![6])
+        );
+
+        // Same element count, transposed axes.
+        assert_eq!(
+            expect_mismatch(Tensor::new(legs(), dense(&[3, 2]))),
+            (vec![2, 3], vec![3, 2])
+        );
+
+        // Same element count, stray length-1 axis.
+        assert_eq!(
+            expect_mismatch(Tensor::new(legs(), dense(&[6, 1]))),
+            (vec![2, 3], vec![6, 1])
+        );
+
+        // Rank 0: the scalar shape `[]` constructs, `[1]` does not.
+        assert!(Tensor::new(Vec::new(), dense(&[])).is_ok());
+        assert_eq!(
+            expect_mismatch(Tensor::new(Vec::new(), dense(&[1]))),
+            (vec![], vec![1])
+        );
     }
 }
