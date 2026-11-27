@@ -1,11 +1,25 @@
 # TensorLoom
 
+[![crates.io](https://img.shields.io/crates/v/tensorloom)](https://crates.io/crates/tensorloom)
+[![docs.rs](https://img.shields.io/docsrs/tensorloom)](https://docs.rs/tensorloom)
+
 Rust Library for Tensor Network Calculations. Early development, API unstable.
 
 **Currently:** Dense tensors with ITensor-style identity-based indices,
 tensor networks built from them, and network contraction planning.
 
 **Planned:** Diagram rendering, MPS, block-sparse symmetry, Python bindings.
+
+## Installation
+
+Add with `cargo add tensorloom`, or:
+
+```toml
+[dependencies]
+tensorloom = "0.0.1"
+```
+
+API documentation: [docs.rs](https://docs.rs/tensorloom).
 
 ## Usage Example
 
