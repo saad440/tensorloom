@@ -16,7 +16,7 @@ Add with `cargo add tensorloom`, or:
 
 ```toml
 [dependencies]
-tensorloom = "0.0.1"
+tensorloom = "0.0.2"
 ```
 
 API documentation: [docs.rs](https://docs.rs/tensorloom).
